@@ -4,15 +4,19 @@ from queue import Queue
 
 class HtmlParser:
 
+    content = None
+
     def __init__(self, url=None, html_s=None):
         if url:
             html_s = requests.get(url).content.decode('utf-8')
+        self.content = html_s
+        #print(html_s)
+        dom, self.text = self.parse(html_s, level=-1, parent=None)
 
-        self.dom, self.text = self.parse(html_s, level=-1, parent=None)
+        self.dom = dom[0]
 
-        self.dom = self.dom[0]
-
-        print(self.dom.select('html'))
+    def select(self, selector):
+        return self.dom.select(selector)
 
     @staticmethod
     def parse(html_s, level, parent):
@@ -35,7 +39,8 @@ class HtmlParser:
                     j -= 1
                 tag_data = html_s[i + 1:j]
                 tags.append(HtmlTag(tag_data, level+1, parent))
-                if tags[-1].name == 'img' or tags[-1].name == 'meta':    #img, meta is not open tag
+                unclosed = ['img', 'meta', 'link']
+                if tags[-1].name in unclosed:    #img, meta is not open tag
                     open_tag = False
                 start_text = j + 1
                 i = j+1
@@ -46,6 +51,15 @@ class HtmlParser:
                 while open_tag and i < len(html_s)-1:
                     if html_s[i] == '<' and html_s[i + 1] != '/' and html_s[i + 1] != '!':
                         tag_level += 1
+                        j=i
+                        unclosed = ['img', 'meta', 'link']
+                        while html_s[j]!='>':
+                            j+=1
+                        tag_name = html_s[i+1:j].split(' ')[0]
+                        #print(tag_name)
+                        if tag_name in unclosed:
+                            tag_level -= 1
+                        i=j
                     if html_s[i] == '/' and html_s[i + 1] == '>':
                         tag_level -= 1
                     if html_s[i] == '<' and html_s[i + 1] == '/':
@@ -56,6 +70,7 @@ class HtmlParser:
                                 j += 1
                             if html_s[i + 2:j] == tags[-1].name:
                                 html = html_s[start_text:i]           #html inner tag
+                                tags[-1].html = html
                                 tags[-1].parse(html)                  #recursive parse inner tags
                                 open_tag = False
                                 html_s = html_s[:start_tag] + html_s[j+1:]      #remove html inner tag
@@ -72,6 +87,7 @@ class HtmlTag:
     childrens = []
     text = ''
     level = 0
+    html = ''
     parent = None
 
     def __init__(self, tag_data, level, parent):
@@ -82,20 +98,21 @@ class HtmlTag:
         self.attrs = {}
 
     def __str__(self):
-        if len(self.childrens)>0:
+        if len(self.childrens) > 0:
             childrens = ': {}'.format(self.childrens)
         else:
             childrens = ''
         return self.name + childrens
 
     def __repr__(self):
-        return '{}: {}'.format(self.name, self.level)
+        return '{}'.format(self.name)
 
     def parse(self, html_s):
+        self.html = html_s
         self.childrens, self.text = HtmlParser.parse(html_s, self.level, self)
 
-    def parse_tag_data(self):
-        self.name = self.tag_data.split(' ')[0]
+    def parse_tag_data(self):                      #parsing data inner <>
+        self.name = self.tag_data.split(' ')[0]    #tag
         if self.tag_data.find(' ')>-1:
             attrs = self.tag_data[self.tag_data.find(' ') + 1:]
             d = {}
@@ -111,13 +128,8 @@ class HtmlTag:
                 if attrs[i] == '=':
                     is_key = False
                     continue
-                if not in_quotes and attrs[i] == ' ':
+                if not in_quotes and attrs[i] == ' ':    #new element of data
                     is_key = True
-                    key = copy.copy(key)
-                    value = copy.copy(value)
-                    d[key] = value
-                    key = ''
-                    value = ''
                     continue
                 if is_key and attrs[i] != ' ':
                     key += attrs[i]
@@ -125,6 +137,12 @@ class HtmlTag:
                     value += attrs[i]
                 else:
                     in_quotes = not in_quotes
+                    if not in_quotes:                #save element of data
+                        key = copy.copy(key)
+                        value = copy.copy(value)
+                        d[key] = value
+                        key = ''
+                        value = ''
 
             if key not in d:
                 d[key] = value
@@ -167,7 +185,10 @@ class HtmlTag:
             if name != '':
                 name_check = elem.name == name
             if s_classes:
-                classes_check = 'class' in elem.attrs and sorted(elem.attrs['class']) == sorted(s_classes)
+                for s_class in s_classes:
+                    if ('class' not in elem.attrs) or (s_class not in elem.attrs['class']):
+                        classes_check = False
+                        break
             if s_ids:
                 ids_check = 'id' in elem.attrs and elem.attrs['id'] == s_ids
 
