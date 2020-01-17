@@ -1,8 +1,8 @@
 import requests
+import copy
+from queue import Queue
 
 class HtmlParser:
-
-
 
     def __init__(self, url=None, html_s=None):
         if url:
@@ -12,17 +12,21 @@ class HtmlParser:
 
         self.dom = self.dom[0]
 
-        print(self.dom)
+        print(self.dom.select('html'))
 
     @staticmethod
     def parse(html_s, level, parent):
         i = 0
-        start_text = 0
+
         tags = []
         open_tag = False
+        start_text = 0
+        start_tag = 0               #index of start tag
         while i < len(html_s):
+            #find open tag
             if html_s[i] == '<' and html_s[i + 1] != '!':
                 open_tag = True
+                start_tag = i
                 j = i
                 while html_s[j] != '>':
                     j += 1
@@ -31,9 +35,12 @@ class HtmlParser:
                     j -= 1
                 tag_data = html_s[i + 1:j]
                 tags.append(HtmlTag(tag_data, level+1, parent))
+                if tags[-1].name == 'img' or tags[-1].name == 'meta':    #img, meta is not open tag
+                    open_tag = False
                 start_text = j + 1
-                i=j+1
+                i = j+1
 
+            #find close tag
             if open_tag:
                 tag_level = 1
                 while open_tag and i < len(html_s)-1:
@@ -47,43 +54,155 @@ class HtmlParser:
                             j = i+1
                             while html_s[j] != '>':
                                 j += 1
-                            if html_s[i + 2:j] == tags[-1].tag:
-                                text = html_s[start_text:i]
-                                tags[-1].parse(text, tags[-1])
+                            if html_s[i + 2:j] == tags[-1].name:
+                                html = html_s[start_text:i]           #html inner tag
+                                tags[-1].parse(html)                  #recursive parse inner tags
                                 open_tag = False
+                                html_s = html_s[:start_tag] + html_s[j+1:]      #remove html inner tag
+                                i -= i - start_tag
                                 break
                     i += 1
-            i+=1
+            i += 1
         return tags, html_s
 
-
 class HtmlTag:
-    tag = ''
-    attributes = {}
+    name = ''
+    attrs = None
+    tag_data = ''
     childrens = []
     text = ''
     level = 0
     parent = None
 
-
     def __init__(self, tag_data, level, parent):
         self.parent = parent
-        self.parse_tag_data(tag_data)
+        self.tag_data = tag_data
+        self.parse_tag_data()
         self.level = level
-
+        self.attrs = {}
 
     def __str__(self):
         if len(self.childrens)>0:
             childrens = ': {}'.format(self.childrens)
         else:
             childrens = ''
-        return self.tag + childrens
+        return self.name + childrens
 
     def __repr__(self):
-        return self.__str__()
+        return '{}: {}'.format(self.name, self.level)
 
-    def parse(self, html_s, parent):
-        self.childrens, self.text = HtmlParser.parse(html_s, self.level, self.tag)
+    def parse(self, html_s):
+        self.childrens, self.text = HtmlParser.parse(html_s, self.level, self)
 
-    def parse_tag_data(self, data):
-        self.tag = data.split(' ')[0]
+    def parse_tag_data(self):
+        self.name = self.tag_data.split(' ')[0]
+        if self.tag_data.find(' ')>-1:
+            attrs = self.tag_data[self.tag_data.find(' ') + 1:]
+            d = {}
+            i = -1
+            key = ''
+            value = ''
+            is_key = True
+            in_quotes = False
+            while i < len(attrs)-1:
+                i += 1
+                if attrs[i] == attrs[i-1] == ' ':
+                    continue
+                if attrs[i] == '=':
+                    is_key = False
+                    continue
+                if not in_quotes and attrs[i] == ' ':
+                    is_key = True
+                    key = copy.copy(key)
+                    value = copy.copy(value)
+                    d[key] = value
+                    key = ''
+                    value = ''
+                    continue
+                if is_key and attrs[i] != ' ':
+                    key += attrs[i]
+                elif attrs[i] not in '\"\'':
+                    value += attrs[i]
+                else:
+                    in_quotes = not in_quotes
+
+            if key not in d:
+                d[key] = value
+
+            if 'class' in d:
+                d['class'] = d['class'].split(' ')
+
+            self.attrs = d
+
+    def select(self, cmd):
+        selectors = cmd.split(' ')
+        q = Queue()
+        q.put({'element': self, 'selectors': selectors})
+        results = []
+        while not q.empty():
+            data = q.get()
+            elem = data['element']
+            elem.parse_tag_data()
+            selectors = data['selectors']
+            s_classes = None
+            if '.' in selectors[0]:
+                s_classes = self.get_group_list('.', selectors[0])     #list of classes
+            s_ids = None
+            if '#' in selectors[0]:
+                s_ids = self.get_group_list('#', selectors[0])[0]      #id
+
+            name = copy.copy(selectors[0])                      #clean name
+            if '.' in name:
+                name = name[:name.find('.')]
+            if '#' in name:
+                name = name[:name.find('#')]
+
+            for child in elem.childrens:
+                q.put({'element': child, 'selectors': selectors})
+
+            name_check = True
+            classes_check = True
+            ids_check = True
+
+            if name != '':
+                name_check = elem.name == name
+            if s_classes:
+                classes_check = 'class' in elem.attrs and sorted(elem.attrs['class']) == sorted(s_classes)
+            if s_ids:
+                ids_check = 'id' in elem.attrs and elem.attrs['id'] == s_ids
+
+            if name_check and classes_check and ids_check:
+                if len(selectors) == 1:
+                    results.append(elem)
+                else:
+                    s = copy.deepcopy(selectors)
+                    del s[0]
+                    for child in elem.childrens:
+                        q.put({'element': child, 'selectors': s})
+        return results
+
+    @staticmethod
+    def get_group_list(char, selector):
+        i = 0
+        group = []
+        tmp = ''
+        is_group = False
+        while i < len(selector):
+            if selector[i] == char:
+                if len(tmp) > 0:
+                    group.append(tmp)
+                tmp = ''
+                is_group = True
+            elif selector[i] == '.' or selector[i] == '#':
+                if len(tmp) > 0:
+                    group.append(tmp)
+                tmp = ''
+                is_group = False
+            elif is_group:
+                tmp += selector[i]
+            i += 1
+        if is_group:
+            group.append(tmp)
+        return group
+
+
