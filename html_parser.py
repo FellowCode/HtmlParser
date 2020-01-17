@@ -5,6 +5,7 @@ from queue import Queue
 class HtmlParser:
 
     content = None
+    tags_d = {}
 
     def __init__(self, url=None, html_s=None):
         if url:
@@ -18,10 +19,18 @@ class HtmlParser:
     def select(self, selector):
         return self.dom.select(selector)
 
+
+
     @staticmethod
     def parse(html_s, level, parent):
         i = 0
+        tags_d = {}
 
+        def add_tag(name):
+            if name not in tags_d:
+                tags_d[name] = 1
+            else:
+                tags_d[name] += 1
         tags = []
         open_tag = False
         start_text = 0
@@ -39,36 +48,38 @@ class HtmlParser:
                     j -= 1
                 tag_data = html_s[i + 1:j]
                 tags.append(HtmlTag(tag_data, level+1, parent))
-                unclosed = ['img', 'meta', 'link']
-                if tags[-1].name in unclosed:    #img, meta is not open tag
-                    open_tag = False
+                add_tag(tags[-1].name)
                 start_text = j + 1
                 i = j+1
 
             #find close tag
             if open_tag:
                 tag_level = 1
+
                 while open_tag and i < len(html_s)-1:
                     if html_s[i] == '<' and html_s[i + 1] != '/' and html_s[i + 1] != '!':
+                        #print(tag_level, '+', html_s[i:i+10])
                         tag_level += 1
                         j=i
-                        unclosed = ['img', 'meta', 'link']
+                        unclosed = ['img', 'meta', 'link', 'path', 'input', 'textarea']
                         while html_s[j]!='>':
                             j+=1
                         tag_name = html_s[i+1:j].split(' ')[0]
-                        #print(tag_name)
-                        if tag_name in unclosed:
+                        add_tag(tag_name)
+
+                        if tag_name in unclosed or html_s[j-1] == '/':
                             tag_level -= 1
                         i=j
-                    if html_s[i] == '/' and html_s[i + 1] == '>':
-                        tag_level -= 1
                     if html_s[i] == '<' and html_s[i + 1] == '/':
+                        #print(tag_level, '--', html_s[i:i + 10])
                         tag_level -= 1
                         if tag_level == 0:
                             j = i+1
                             while html_s[j] != '>':
                                 j += 1
+                            add_tag(html_s[i + 2:j])
                             if html_s[i + 2:j] == tags[-1].name:
+
                                 html = html_s[start_text:i]           #html inner tag
                                 tags[-1].html = html
                                 tags[-1].parse(html)                  #recursive parse inner tags
@@ -76,7 +87,9 @@ class HtmlParser:
                                 html_s = html_s[:start_tag] + html_s[j+1:]      #remove html inner tag
                                 i -= i - start_tag
                                 break
+                    print(tag_level)
                     i += 1
+                print(tags_d)
             i += 1
         return tags, html_s
 
