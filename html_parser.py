@@ -1,24 +1,26 @@
 import requests
+from html.parser import HTMLParser
+
+
+
 import copy
 from queue import Queue
-from html.parser import HTMLParser
 from html.entities import name2codepoint
 
 class HtmlParser:
     class CustomHTMLParser(HTMLParser):
-        root = None
-        cur_tag = None
+
+        def __init__(self):
+            super().__init__()
+            self.root = HtmlTag('root', {})
+            self.cur_tag = self.root
+
         def handle_starttag(self, tag, attrs):
             attrs = dict(attrs)
             if 'class' in attrs:
                 attrs['class'] = attrs['class'].split(' ')
-            if not self.root:
-                self.root = HtmlTag(tag, attrs, 0)
-                self.cur_tag = self.root
-                return
 
-            lv = self.cur_tag.lv
-            t = HtmlTag(tag, attrs, lv=lv+1, parent=self.cur_tag)
+            t = HtmlTag(tag, attrs, parent=self.cur_tag)
             self.cur_tag.add_child(t)
             self.cur_tag = t
 
@@ -31,18 +33,15 @@ class HtmlParser:
             for t in tags:
                 t.parent = self.cur_tag
                 t.childrens = []
-                t.lv = self.cur_tag.lv+1
 
             self.cur_tag.childrens += tags
             self.cur_tag = self.cur_tag.parent
 
         def handle_data(self, data):
-            if self.cur_tag:
-                self.cur_tag.text = data
+            self.cur_tag.text += data
 
         def handle_comment(self, data):
-            if self.cur_tag:
-                self.cur_tag.add_comment(data)
+            self.cur_tag.add_comment(data)
 
         def feed(self, data):
             super().feed(data)
@@ -59,18 +58,21 @@ class HtmlParser:
         self.root = p.feed(self.content)
 
 
-
-
 class HtmlTag:
 
-    def __init__(self, tag, attrs, lv, parent=None):
+    def __init__(self, tag, attrs, parent=None):
         self.tag = tag
         self.attrs = attrs
-        self.lv = lv
         self.parent = parent
         self.childrens = []
         self.comments = []
         self.text = ''
+
+    def add_child(self, c):
+        self.childrens.append(c)
+
+    def add_comment(self, c):
+        self.comments.append(c)
 
     def __str__(self):
         if len(self.childrens) > 0:
@@ -82,11 +84,7 @@ class HtmlTag:
     def __repr__(self):
         return '{}'.format(self.tag)
 
-    def add_child(self, c):
-        self.childrens.append(c)
 
-    def add_comment(self, c):
-        self.comments.append(c)
 
     def select(self, cmd):
         selectors = cmd.split(' ')
