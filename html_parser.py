@@ -1,169 +1,92 @@
 import requests
 import copy
 from queue import Queue
+from html.parser import HTMLParser
+from html.entities import name2codepoint
 
 class HtmlParser:
+    class CustomHTMLParser(HTMLParser):
+        root = None
+        cur_tag = None
+        def handle_starttag(self, tag, attrs):
+            attrs = dict(attrs)
+            if 'class' in attrs:
+                attrs['class'] = attrs['class'].split(' ')
+            if not self.root:
+                self.root = HtmlTag(tag, attrs, 0)
+                self.cur_tag = self.root
+                return
 
-    content = None
-    tags_d = {}
+            lv = self.cur_tag.lv
+            t = HtmlTag(tag, attrs, lv=lv+1, parent=self.cur_tag)
+            self.cur_tag.add_child(t)
+            self.cur_tag = t
+
+        def handle_endtag(self, tag):
+            tags = []
+            while self.cur_tag.tag != tag:
+                tags.append(self.cur_tag)
+                self.cur_tag = self.cur_tag.parent
+
+            for t in tags:
+                t.parent = self.cur_tag
+                t.childrens = []
+                t.lv = self.cur_tag.lv+1
+
+            self.cur_tag.childrens += tags
+            self.cur_tag = self.cur_tag.parent
+
+        def handle_data(self, data):
+            if self.cur_tag:
+                self.cur_tag.text = data
+
+        def handle_comment(self, data):
+            if self.cur_tag:
+                self.cur_tag.add_comment(data)
+
+        def feed(self, data):
+            super().feed(data)
+            return self.root
 
     def __init__(self, url=None, html_s=None):
         if url:
             html_s = requests.get(url).content.decode('utf-8')
         self.content = html_s
-        #print(html_s)
-        dom, self.text = self.parse(html_s, level=-1, parent=None)
+        self.parse()
 
-        self.dom = dom[0]
-
-    def select(self, selector):
-        return self.dom.select(selector)
+    def parse(self):
+        p = self.CustomHTMLParser()
+        self.root = p.feed(self.content)
 
 
 
-    @staticmethod
-    def parse(html_s, level, parent):
-        i = 0
-        tags_d = {}
-
-        def add_tag(name):
-            if name not in tags_d:
-                tags_d[name] = 1
-            else:
-                tags_d[name] += 1
-        tags = []
-        open_tag = False
-        start_text = 0
-        start_tag = 0               #index of start tag
-        while i < len(html_s):
-            #find open tag
-            if html_s[i] == '<' and html_s[i + 1] != '!':
-                open_tag = True
-                start_tag = i
-                j = i
-                while html_s[j] != '>':
-                    j += 1
-                if html_s[j - 1] == '/':
-                    open_tag = False
-                    j -= 1
-                tag_data = html_s[i + 1:j]
-                tags.append(HtmlTag(tag_data, level+1, parent))
-                add_tag(tags[-1].name)
-                start_text = j + 1
-                i = j+1
-
-            #find close tag
-            if open_tag:
-                tag_level = 1
-
-                while open_tag and i < len(html_s)-1:
-                    if html_s[i] == '<' and html_s[i + 1] != '/' and html_s[i + 1] != '!':
-                        #print(tag_level, '+', html_s[i:i+10])
-                        tag_level += 1
-                        j=i
-                        unclosed = ['img', 'meta', 'link', 'path', 'input', 'textarea']
-                        while html_s[j]!='>':
-                            j+=1
-                        tag_name = html_s[i+1:j].split(' ')[0]
-                        add_tag(tag_name)
-
-                        if tag_name in unclosed or html_s[j-1] == '/':
-                            tag_level -= 1
-                        i=j
-                    if html_s[i] == '<' and html_s[i + 1] == '/':
-                        #print(tag_level, '--', html_s[i:i + 10])
-                        tag_level -= 1
-                        if tag_level == 0:
-                            j = i+1
-                            while html_s[j] != '>':
-                                j += 1
-                            add_tag(html_s[i + 2:j])
-                            if html_s[i + 2:j] == tags[-1].name:
-
-                                html = html_s[start_text:i]           #html inner tag
-                                tags[-1].html = html
-                                tags[-1].parse(html)                  #recursive parse inner tags
-                                open_tag = False
-                                html_s = html_s[:start_tag] + html_s[j+1:]      #remove html inner tag
-                                i -= i - start_tag
-                                break
-                    print(tag_level)
-                    i += 1
-                print(tags_d)
-            i += 1
-        return tags, html_s
 
 class HtmlTag:
-    name = ''
-    attrs = None
-    tag_data = ''
-    childrens = []
-    text = ''
-    level = 0
-    html = ''
-    parent = None
 
-    def __init__(self, tag_data, level, parent):
+    def __init__(self, tag, attrs, lv, parent=None):
+        self.tag = tag
+        self.attrs = attrs
+        self.lv = lv
         self.parent = parent
-        self.tag_data = tag_data
-        self.parse_tag_data()
-        self.level = level
-        self.attrs = {}
+        self.childrens = []
+        self.comments = []
+        self.text = ''
 
     def __str__(self):
         if len(self.childrens) > 0:
             childrens = ': {}'.format(self.childrens)
         else:
             childrens = ''
-        return self.name + childrens
+        return self.tag + childrens
 
     def __repr__(self):
-        return '{}'.format(self.name)
+        return '{}'.format(self.tag)
 
-    def parse(self, html_s):
-        self.html = html_s
-        self.childrens, self.text = HtmlParser.parse(html_s, self.level, self)
+    def add_child(self, c):
+        self.childrens.append(c)
 
-    def parse_tag_data(self):                      #parsing data inner <>
-        self.name = self.tag_data.split(' ')[0]    #tag
-        if self.tag_data.find(' ')>-1:
-            attrs = self.tag_data[self.tag_data.find(' ') + 1:]
-            d = {}
-            i = -1
-            key = ''
-            value = ''
-            is_key = True
-            in_quotes = False
-            while i < len(attrs)-1:
-                i += 1
-                if attrs[i] == attrs[i-1] == ' ':
-                    continue
-                if attrs[i] == '=':
-                    is_key = False
-                    continue
-                if not in_quotes and attrs[i] == ' ':    #new element of data
-                    is_key = True
-                    continue
-                if is_key and attrs[i] != ' ':
-                    key += attrs[i]
-                elif attrs[i] not in '\"\'':
-                    value += attrs[i]
-                else:
-                    in_quotes = not in_quotes
-                    if not in_quotes:                #save element of data
-                        key = copy.copy(key)
-                        value = copy.copy(value)
-                        d[key] = value
-                        key = ''
-                        value = ''
-
-            if key not in d:
-                d[key] = value
-
-            if 'class' in d:
-                d['class'] = d['class'].split(' ')
-
-            self.attrs = d
+    def add_comment(self, c):
+        self.comments.append(c)
 
     def select(self, cmd):
         selectors = cmd.split(' ')
@@ -173,7 +96,6 @@ class HtmlTag:
         while not q.empty():
             data = q.get()
             elem = data['element']
-            elem.parse_tag_data()
             selectors = data['selectors']
             s_classes = None
             if '.' in selectors[0]:
@@ -182,21 +104,21 @@ class HtmlTag:
             if '#' in selectors[0]:
                 s_ids = self.get_group_list('#', selectors[0])[0]      #id
 
-            name = copy.copy(selectors[0])                      #clean name
-            if '.' in name:
-                name = name[:name.find('.')]
-            if '#' in name:
-                name = name[:name.find('#')]
+            tag = copy.copy(selectors[0])                      #clean name
+            if '.' in tag:
+                tag = tag[:tag.find('.')]
+            if '#' in tag:
+                tag = tag[:tag.find('#')]
 
             for child in elem.childrens:
                 q.put({'element': child, 'selectors': selectors})
 
-            name_check = True
+            tag_check = True
             classes_check = True
             ids_check = True
 
-            if name != '':
-                name_check = elem.name == name
+            if tag != '':
+                tag_check = elem.tag == tag
             if s_classes:
                 for s_class in s_classes:
                     if ('class' not in elem.attrs) or (s_class not in elem.attrs['class']):
@@ -205,7 +127,7 @@ class HtmlTag:
             if s_ids:
                 ids_check = 'id' in elem.attrs and elem.attrs['id'] == s_ids
 
-            if name_check and classes_check and ids_check:
+            if tag_check and classes_check and ids_check:
                 if len(selectors) == 1:
                     results.append(elem)
                 else:
