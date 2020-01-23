@@ -9,7 +9,6 @@ from html.entities import name2codepoint
 
 class HtmlParser:
     class CustomHTMLParser(HTMLParser):
-
         def __init__(self):
             super().__init__()
             self.root = HtmlTag('root', {})
@@ -51,9 +50,6 @@ class HtmlParser:
         if url:
             html_s = requests.get(url).content.decode('utf-8')
         self.content = html_s
-        self.parse()
-
-    def parse(self):
         p = self.CustomHTMLParser()
         self.root = p.feed(self.content)
 
@@ -95,6 +91,10 @@ class HtmlTag:
             data = q.get()
             elem = data['element']
             selectors = data['selectors']
+
+            for child in elem.childrens:
+                q.put({'element': child, 'selectors': selectors})
+
             s_classes = None
             if '.' in selectors[0]:
                 s_classes = self.get_group_list('.', selectors[0])     #list of classes
@@ -108,8 +108,7 @@ class HtmlTag:
             if '#' in tag:
                 tag = tag[:tag.find('#')]
 
-            for child in elem.childrens:
-                q.put({'element': child, 'selectors': selectors})
+
 
             tag_check = True
             classes_check = True
