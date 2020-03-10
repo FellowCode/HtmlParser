@@ -24,6 +24,7 @@ class HtmlParser:
             tags = []
             while self.cur_tag.tag != tag:
                 tags += self.cur_tag.children
+                self.cur_tag.children = []
                 self.cur_tag = self.cur_tag.parent
 
             for t in tags:

@@ -1,7 +1,7 @@
 from setuptools import setup, find_packages
 
 setup(name='html_jparser',
-      version='0.1',
+      version='0.2',
       install_requires=["requests"],
       packages=['html_jparser'],
       zip_safe=False,
