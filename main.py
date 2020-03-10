@@ -1,9 +1,7 @@
-from html_parser import HtmlParser
+from html_jparser.core import HtmlParser
 
-p = HtmlParser(url='https://easypassword.ru')
+p = HtmlParser(url='https://easypassword.ru/accounts/login/')
+print(p.root.select('input[name=csrfmiddlewaretoken]')[0].attrs)
+
+p = HtmlParser(html_s=open('index.html', 'r', encoding='utf-8').read())
 print(p.root)
-
-with open('index.html', 'r', encoding='utf-8') as f:
-    s = str(f.read())
-    p = HtmlParser(html_s=s)
-    print(p.root)
