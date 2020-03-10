@@ -3,59 +3,81 @@ from html.parser import HTMLParser
 from queue import Queue
 
 
-class HtmlParser:
-    """Html Parser"""
-    class CustomHTMLParser(HTMLParser):
-        def __init__(self):
-            super().__init__()
-            self.root = HtmlTag('root', {})
-            self.cur_tag = self.root
+class CustomHTMLParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.root = HtmlTag('root', {})
+        self.cur_tag = self.root
 
-        def handle_starttag(self, tag, attrs):
-            attrs = dict(attrs)
-            if 'class' in attrs:
-                attrs['class'] = attrs['class'].split(' ')
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        if 'class' in attrs:
+            attrs['class'] = attrs['class'].split(' ')
 
-            t = HtmlTag(tag, attrs, parent=self.cur_tag)
-            self.cur_tag.add_child(t)
-            self.cur_tag = t
+        t = HtmlTag(tag, attrs, parent=self.cur_tag)
+        self.cur_tag.add_child(t)
+        self.cur_tag = t
 
-        def handle_endtag(self, tag):
-            tags = []
-            while self.cur_tag.tag != tag:
-                tags += self.cur_tag.children
-                self.cur_tag.children = []
-                self.cur_tag = self.cur_tag.parent
-
-            for t in tags:
-                t.parent = self.cur_tag
-                t.children = []
-
-            self.cur_tag.children += tags
+    def handle_endtag(self, tag):
+        tags = []
+        while self.cur_tag.tag != tag:
+            tags += self.cur_tag.children
+            self.cur_tag.children = []
             self.cur_tag = self.cur_tag.parent
 
-        def handle_data(self, data):
-            self.cur_tag.text += data
+        for t in tags:
+            t.parent = self.cur_tag
+            t.children = []
 
-        def handle_comment(self, data):
-            self.cur_tag.add_comment(data)
+        self.cur_tag.children += tags
+        self.cur_tag = self.cur_tag.parent
 
-        def feed(self, data):
-            super().feed(data)
-            return self.root
+    def handle_data(self, data):
+        self.cur_tag.text += data
+
+    def handle_comment(self, data):
+        self.cur_tag.add_comment(data)
+
+    def feed(self, data):
+        super().feed(data)
+        return self.root
+
+
+class HtmlParser:
+    """Html Parser"""
 
     def __init__(self, url=None, html_s=None):
         """url: string
         html_s: string"""
+        self.cache_dict = {}
+        self.parse(url, html_s)
+
+    def parse(self, url=None, html_s=None):
         if url:
             html_s = requests.get(url).content.decode('utf-8')
         self.content = html_s
-        p = self.CustomHTMLParser()
+        p = CustomHTMLParser()
         self.root = p.feed(self.content)
 
-    def select(self, cmd):
+    def select(self, cmd, cache=False):
         """Jquery select from root"""
-        return self.root.select(cmd)
+        if cache and cmd in self.cache_dict:
+            return self.get_tags(self.cache_dict[cmd])
+        tags = self.root.select(cmd)
+        self.cache_dict[cmd] = []
+        for tag in tags:
+            self.cache_dict[cmd].append(tag.get_path())
+        return tags
+
+    def get_tag(self, path):
+        index_list = list(map(int, path.split(':')))
+        tag = self.root
+        for index in index_list:
+            tag = tag.children[index]
+        return tag
+
+    def get_tags(self, path_list):
+        return [self.get_tag(path) for path in path_list]
 
 
 class Selector:
@@ -220,3 +242,14 @@ class HtmlTag:
                     for child in html_tag.children:
                         q.put({'html_tag': child, 'selectors': selectors[1:]})
         return results
+
+    def get_path(self):
+        path = ''
+        cur_tag = self
+        while cur_tag.parent:
+            for i, child in enumerate(cur_tag.parent.children):
+                if cur_tag == child:
+                    path = f':{i}' + path
+                    break
+            cur_tag = cur_tag.parent
+        return path[1:]
