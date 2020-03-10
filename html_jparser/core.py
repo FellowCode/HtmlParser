@@ -90,12 +90,12 @@ class Selector:
 
     def __check_id(self, html_tag):
         if self.id != '':
-            return self.id == html_tag.attrs['id']
+            return 'id' in html_tag.attrs and self.id == html_tag.attrs['id']
         return True
 
     def __check_cls(self, html_tag):
         if len(self.cls) > 0:
-            return self.cls in html_tag.attrs['class']
+            return 'class' in html_tag.attrs and all(cls in html_tag.attrs['class'] for cls in self.cls)
         return True
 
     def __check_attrs(self, html_tag):
@@ -119,8 +119,11 @@ class Selector:
         for i, c in enumerate(self.cmd):
             if c in stop_sep and start:
                 cls_list.append(self.cmd[start+1:i])
+                start = None
             if c == start_sep:
                 start = i
+        if start is not None:
+            cls_list.append(self.cmd[start+1:])
         return cls_list
 
     def __clean_cls(self):
@@ -154,6 +157,12 @@ class Selector:
         """Return list of Selector
         cmd: Jquery selector like string"""
         return [Selector(cmd_part) for cmd_part in cmd.split(Selector.sep)]
+
+    def __str__(self):
+        return self.cmd
+
+    def __repr__(self):
+        return f'<Selector: {self.cmd}>'
 
 
 class HtmlTag:
@@ -192,7 +201,8 @@ class HtmlTag:
         cmd: string (Jquery selector)
         selector_cls: custom Selector (optionally)"""
         q = Queue()
-        q.put({'html_tag': self, 'selectors': selector_cls.parse(cmd)})
+        selectors = selector_cls.parse(cmd)
+        q.put({'html_tag': self, 'selectors': selectors})
         results = []
         # BFS
         while not q.empty():

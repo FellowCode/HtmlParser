@@ -2,7 +2,7 @@
 Library for parsing html with JQuery element selection. Very easy to use.
 
 ## Installing
-Library on PyPi: https://pypi.org/project/html-jparser/0.2/
+Library on PyPi: https://pypi.org/project/html-jparser/0.3/
 ```
 pip install html-jparser
 ```
